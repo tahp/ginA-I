@@ -13,7 +13,7 @@ class ChatConfig:
     """Configuration for the Chatbot."""
     model_name: str = field(default_factory=lambda: os.getenv("MODEL_NAME", "llama3"))
     history_limit: int = 10
-    system_prompt: Optional[str] = None
+    system_prompt: Optional[str] = field(default_factory=lambda: os.getenv("SYSTEM_PROMPT"))
     stream: bool = True
 
 class ChatClient:
