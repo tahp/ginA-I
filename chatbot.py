@@ -21,13 +21,13 @@ def main():
         history.append({'role': 'user', 'content': user_input})
 
         try:
-            # Send the entire history to Ollama to generate a response
-            response = ollama.chat(model='llama3', messages=history)
+            # Send the entire history to Ollama to generate a response using the specific model
+            response = ollama.chat(model='hf.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2:Q4_K_M', messages=history)
             
             # Extract content from the response
             ai_response = response['message']['content']
             
-            print(f"Chatsbot: {ai_response}")
+            print(f"Chatbot: {ai_response}")
             
             # Add the AI's response to history for context
             history.append({'role': 'assistant', 'content': ai_response})
