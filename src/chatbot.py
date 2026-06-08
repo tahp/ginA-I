@@ -1,54 +1,78 @@
 import os
+from typing import List, Dict, Optional
 import ollama
 from dotenv import load_dotenv
+from dataclasses import dataclass, field
 
 # Load environment variables from .env file
 load_dotenv()
 
-def main():
+@dataclass
+class ChatConfig:
+    """Configuration for the Chatbot."""
+    model_name: str = field(default_factory=lambda: os.getenv("MODEL_NAME", "llama3"))
+    history_limit: int = 10
+    system_prompt: Optional[str] = None
+
+class ChatClient:
+    """Client for interacting with the Ollama API."""
+    def __init__(self, config: ChatConfig):
+        self.config = config
+        self.history: List[Dict[str, str]] = []
+        if self.config.system_prompt:
+            self.history.append({'role': 'system', 'content': self.config.system_prompt})
+
+    def get_response(self, user_input: str) -> str:
+        """Sends user input to Ollama and returns the AI response."""
+        self.history.append({'role': 'user', 'content': user_input})
+        
+        try:
+            response = ollama.chat(model=self.config.model_name, messages=self.history)
+            ai_response: str = response['message']['content']
+            self.history.append({'role': 'assistant', 'content': ai_response})
+            self._trim_history()
+            return ai_response
+        except Exception as e:
+            self.history.pop()  # Remove the user input if it failed
+            raise e
+
+    def _trim_history(self) -> None:
+        """Keeps history within the configured limit."""
+        # System prompt should always stay if present
+        start_index = 1 if self.config.system_prompt else 0
+        while len(self.history) > self.config.history_limit + start_index:
+            self.history.pop(start_index)
+
+def main() -> None:
     """
     Main entry point of the chatbot program.
     Runs an infinite loop to take user input and provide responses via Ollama API.
     """
-    model_name = os.getenv("MODEL_NAME", "llama3")
-    # history will store the last 10 messages (alternating between user and bot)
-    history = []
+    config = ChatConfig()
+    client = ChatClient(config)
+
+    print(f"Chatbot initialized with model: {config.model_name}")
+    print("Type 'quit' to exit.")
 
     while True:
-        # Prompt the user for input and clean up whitespace/casing
-        user_input = input("You: ").strip()
-        
-        # Check if the user wants to exit the program
-        if user_input.lower() == 'quit':
-            print("Chatbot: Goodbye!")
-            break
-        
-        # Add user input to history for context
-        history.append({'role': 'user', 'content': user_input})
-
         try:
-            # Send the entire history to Ollama to generate a response using the specific model
-            response = ollama.chat(model=model_name, messages=history)
+            user_input: str = input("You: ").strip()
             
-            # Extract content from the response
-            ai_response = response['message']['content']
-            
-            print(f"Chatbot: {ai_response}")
-            
-            # Add the AI's response to history for context
-            history.append({'role': 'assistant', 'content': ai_response})
+            if not user_input:
+                continue
 
+            if user_input.lower() == 'quit':
+                print("Chatbot: Goodbye!")
+                break
+            
+            ai_response = client.get_response(user_input)
+            print(f"Chatbot: {ai_response}")
+
+        except KeyboardInterrupt:
+            print("\nChatbot: Goodbye!")
+            break
         except Exception as e:
             print(f"An error occurred: {e}")
-            # If there is an error, we might want to remove the last user input 
-            # so the history doesn't get desynced with successful turns.
-            history.pop()
-            continue
-
-        # Keep only the last 10 messages in history (5 pairs of user/assistant)
-        if len(history) > 10:
-            history.pop(0)
 
 if __name__ == "__main__":
-    # Execute the main function when the script is run directly
     main()
