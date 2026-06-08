@@ -69,6 +69,7 @@ class ChatClient:
                 self.history.append({'role': 'assistant', 'content': full_response})
                 self._trim_history()
                 self._save_history()
+                yield full_response
                 return full_response
         except Exception as e:
             self.history.pop()  # Remove the user input if it failed
