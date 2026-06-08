@@ -1,10 +1,16 @@
+import os
 import ollama
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def main():
     """
     Main entry point of the chatbot program.
     Runs an infinite loop to take user input and provide responses via Ollama API.
     """
+    model_name = os.getenv("MODEL_NAME", "llama3")
     # history will store the last 10 messages (alternating between user and bot)
     history = []
 
@@ -22,7 +28,7 @@ def main():
 
         try:
             # Send the entire history to Ollama to generate a response using the specific model
-            response = ollama.chat(model='hf.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2:Q4_K_M', messages=history)
+            response = ollama.chat(model=model_name, messages=history)
             
             # Extract content from the response
             ai_response = response['message']['content']
