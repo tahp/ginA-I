@@ -7,6 +7,14 @@ from ollama import AsyncClient
 from dotenv import load_dotenv
 from dataclasses import dataclass, field
 
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.live import Live
+from rich.text import Text
+from rich.spinner import Spinner
+from rich.prompt import Prompt
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -39,7 +47,7 @@ class ChatClient:
                 with open(self.config.history_file, 'r') as f:
                     self.history = json.load(f)
             except Exception as e:
-                print(f"Warning: Could not load history from {self.config.history_file}: {e}")
+                pass # Fail silently or handle with console later
 
     def _save_history(self) -> None:
         """Saves history to a JSON file."""
@@ -47,12 +55,11 @@ class ChatClient:
             with open(self.config.history_file, 'w') as f:
                 json.dump(self.history, f, indent=2)
         except Exception as e:
-            print(f"Warning: Could not save history to {self.config.history_file}: {e}")
+            pass
 
     def set_model(self, model_name: str) -> None:
         """Updates the active model."""
         self.config.model_name = model_name
-        print(f"Model switched to: {model_name}")
 
     async def list_models(self) -> List[str]:
         """Lists available local models."""
@@ -94,7 +101,7 @@ class ChatClient:
         if len(self.history) > self.config.summarize_at:
             await self._summarize_history()
         
-        # Fallback trimming if summarization didn't reduce it enough or is disabled
+        # Fallback trimming
         start_index = 0
         if self.history and self.history[0]['role'] == 'system':
             start_index = 1
@@ -104,9 +111,6 @@ class ChatClient:
 
     async def _summarize_history(self) -> None:
         """Summarizes the middle part of the history to save context."""
-        print("\n[System: Summarizing older conversation to save space...]")
-        
-        # We keep the system prompt (index 0) and summarize the next few messages
         start_idx = 1 if self.history[0]['role'] == 'system' else 0
         messages_to_summarize = self.history[start_idx : start_idx + 6]
         
@@ -121,70 +125,83 @@ class ChatClient:
             )
             summary_content = response['message']['content']
             
-            # Replace the summarized messages with a single summary message
             new_history = []
             if start_idx == 1:
-                new_history.append(self.history[0]) # Keep system prompt
+                new_history.append(self.history[0])
             
             new_history.append({'role': 'system', 'content': f"Summary of previous conversation: {summary_content}"})
             new_history.extend(self.history[start_idx + 6 :])
             self.history = new_history
-            
-        except Exception as e:
-            print(f"Warning: Summarization failed: {e}")
+        except Exception:
+            pass
 
 async def main() -> None:
     """
-    Main entry point of the chatbot program.
-    Runs an asynchronous loop to take user input and provide responses via Ollama API.
+    Main entry point of the chatbot program with Rich Terminal UI.
     """
+    console = Console()
     config = ChatConfig()
     client = ChatClient(config)
 
-    print(f"Chatbot initialized with model: {config.model_name}")
-    print("Commands: /quit, /model <name>, /list")
+    console.print(Panel.fit(
+        f"[bold blue]Ollama Chatbot[/bold blue]\n"
+        f"Model: [green]{config.model_name}[/green]\n"
+        f"Commands: [cyan]/quit, /model <name>, /list[/cyan]",
+        title="Welcome",
+        border_style="blue"
+    ))
 
     while True:
         try:
-            user_input: str = input("\nYou: ").strip()
+            user_input: str = Prompt.ask("\n[bold yellow]You[/bold yellow]")
             
-            if not user_input:
+            if not user_input.strip():
                 continue
 
             # Command Routing
             if user_input.lower() in ['/quit', 'quit']:
-                print("Chatbot: Goodbye!")
+                console.print("[bold red]Chatbot: Goodbye![/bold red]")
                 break
             
             if user_input.lower() == '/list':
-                models = await client.list_models()
-                print("Available models:")
-                for m in models:
-                    print(f" - {m}")
+                with console.status("[bold green]Fetching models..."):
+                    models = await client.list_models()
+                
+                if models:
+                    console.print("\n[bold cyan]Available models:[/bold cyan]")
+                    for m in models:
+                        console.print(f" • {m}")
+                else:
+                    console.print("[red]No models found or Ollama is offline.[/red]")
                 continue
 
             if user_input.lower().startswith('/model '):
                 new_model = user_input[7:].strip()
                 if new_model:
                     client.set_model(new_model)
+                    console.print(f"[bold green]Model switched to: {new_model}[/bold green]")
                 continue
             
             # Normal chat
-            print("Chatbot: ", end="", flush=True)
+            full_response = ""
+            console.print("\n[bold blue]Chatbot:[/bold blue]")
+            
             if config.stream:
-                async for chunk in client.get_response(user_input):
-                    print(chunk, end="", flush=True)
-                print()
+                with Live(Text("..."), refresh_per_second=10, console=console) as live:
+                    async for chunk in client.get_response(user_input):
+                        full_response += chunk
+                        live.update(Markdown(full_response))
             else:
-                async for chunk in client.get_response(user_input):
-                    print(chunk)
-                    break
+                with console.status("[bold blue]Thinking..."):
+                    async for chunk in client.get_response(user_input):
+                        full_response += chunk
+                console.print(Markdown(full_response))
 
         except KeyboardInterrupt:
-            print("\nChatbot: Goodbye!")
+            console.print("\n[bold red]Chatbot: Goodbye![/bold red]")
             break
         except Exception as e:
-            print(f"\nAn error occurred: {e}")
+            console.print(f"\n[bold red]An error occurred:[/bold red] {e}")
 
 if __name__ == "__main__":
     try:
