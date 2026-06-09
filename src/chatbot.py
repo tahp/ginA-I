@@ -18,6 +18,7 @@ class ChatConfig:
     system_prompt: Optional[str] = field(default_factory=lambda: os.getenv("SYSTEM_PROMPT"))
     stream: bool = True
     history_file: str = "chat_history.json"
+    summarize_at: int = 15  # Trigger summarization when history exceeds this
 
 class ChatClient:
     """Asynchronous client for interacting with the Ollama API."""
@@ -29,7 +30,7 @@ class ChatClient:
         
         # If history is empty and we have a system prompt, add it
         if not self.history and self.config.system_prompt:
-            self.history.append({'role': 'system', 'content': self.config.system_prompt})
+            self.history.insert(0, {'role': 'system', 'content': self.config.system_prompt})
 
     def _load_history(self) -> None:
         """Loads history from a JSON file if it exists."""
@@ -74,13 +75,13 @@ class ChatClient:
                     full_response += content
                     yield content
                 self.history.append({'role': 'assistant', 'content': full_response})
-                self._trim_history()
+                await self._manage_history()
                 self._save_history()
             else:
                 response = await self.client.chat(model=self.config.model_name, messages=self.history, stream=False)
                 full_response = response['message']['content']
                 self.history.append({'role': 'assistant', 'content': full_response})
-                self._trim_history()
+                await self._manage_history()
                 self._save_history()
                 yield full_response
         except Exception as e:
@@ -88,12 +89,49 @@ class ChatClient:
                 self.history.pop()  # Remove the user input if it failed
             raise e
 
-    def _trim_history(self) -> None:
-        """Keeps history within the configured limit."""
-        # System prompt should always stay if present
-        start_index = 1 if self.config.system_prompt else 0
+    async def _manage_history(self) -> None:
+        """Manages history by trimming or summarising."""
+        if len(self.history) > self.config.summarize_at:
+            await self._summarize_history()
+        
+        # Fallback trimming if summarization didn't reduce it enough or is disabled
+        start_index = 0
+        if self.history and self.history[0]['role'] == 'system':
+            start_index = 1
+        
         while len(self.history) > self.config.history_limit + start_index:
             self.history.pop(start_index)
+
+    async def _summarize_history(self) -> None:
+        """Summarizes the middle part of the history to save context."""
+        print("\n[System: Summarizing older conversation to save space...]")
+        
+        # We keep the system prompt (index 0) and summarize the next few messages
+        start_idx = 1 if self.history[0]['role'] == 'system' else 0
+        messages_to_summarize = self.history[start_idx : start_idx + 6]
+        
+        summary_prompt = "Summarize the following part of a conversation concisely, focusing on key facts and requests:\n\n"
+        for msg in messages_to_summarize:
+            summary_prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
+        
+        try:
+            response = await self.client.chat(
+                model=self.config.model_name,
+                messages=[{'role': 'user', 'content': summary_prompt}]
+            )
+            summary_content = response['message']['content']
+            
+            # Replace the summarized messages with a single summary message
+            new_history = []
+            if start_idx == 1:
+                new_history.append(self.history[0]) # Keep system prompt
+            
+            new_history.append({'role': 'system', 'content': f"Summary of previous conversation: {summary_content}"})
+            new_history.extend(self.history[start_idx + 6 :])
+            self.history = new_history
+            
+        except Exception as e:
+            print(f"Warning: Summarization failed: {e}")
 
 async def main() -> None:
     """
