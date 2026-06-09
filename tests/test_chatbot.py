@@ -65,8 +65,8 @@ class TestChatClientAdvanced(unittest.IsolatedAsyncioTestCase):
         # It takes index 1 to 7 (6 messages). 
         # History was: [sys, 1, 1a, 2, 2a, 3, 3a, 4, 4a]
         # Summarized: [1, 1a, 2, 2a, 3, 3a]
-        # New history: [sys, summary, 4, 4a] -> Length 4
-        self.assertEqual(client.history[1]['content'], 'Summary of previous conversation: This is a summary.')
+        # new_history: [sys, summary, 4, 4a] -> Length 4
+        self.assertEqual(client.history[1]['content'], 'Summary: This is a summary.')
         self.assertEqual(len(client.history), 4)
 
     async def test_trim_fallback(self):
@@ -76,6 +76,37 @@ class TestChatClientAdvanced(unittest.IsolatedAsyncioTestCase):
         client.history = [{'role': 'user', 'content': str(i)} for i in range(20)]
         await client._manage_history()
         self.assertEqual(len(client.history), 5) # history_limit is 5
+
+    @patch('ollama.AsyncClient.list')
+    async def test_list_models(self, mock_list):
+        mock_list.return_value = {'models': [{'name': 'model1'}, {'name': 'model2'}]}
+        client = ChatClient(self.config)
+        models = await client.list_models()
+        self.assertEqual(models, ['model1', 'model2'])
+
+    @patch('ollama.AsyncClient.pull')
+    async def test_pull_model(self, mock_pull):
+        async def mock_pull_stream(*args, **kwargs):
+            yield {'status': 'downloading', 'completed': 50, 'total': 100}
+            yield {'status': 'success'}
+        
+        mock_pull.return_value = mock_pull_stream()
+        client = ChatClient(self.config)
+        progress_updates = []
+        async for progress in client.pull_model('new-model'):
+            progress_updates.append(progress)
+        
+        self.assertEqual(len(progress_updates), 2)
+        self.assertEqual(progress_updates[0]['status'], 'downloading')
+        self.assertEqual(progress_updates[1]['status'], 'success')
+
+    @patch('ollama.AsyncClient.delete')
+    async def test_delete_model(self, mock_delete):
+        mock_delete.return_value = {}
+        client = ChatClient(self.config)
+        success = await client.delete_model('old-model')
+        self.assertTrue(success)
+        mock_delete.assert_called_once_with('old-model')
 
 if __name__ == '__main__':
     unittest.main()

@@ -83,7 +83,6 @@ class ChatClient:
     def __init__(self, config: ChatConfig):
         self.config = config
         self.history: List[Dict[str, Any]] = []
-        self.client = AsyncClient()
         self._load_history()
         
         if not self.history and self.config.system_prompt:
@@ -111,86 +110,104 @@ class ChatClient:
 
     async def list_models(self) -> List[str]:
         try:
-            response = await self.client.list()
-            return [m['name'] for m in response['models']]
+            async with AsyncClient() as client:
+                response = await client.list()
+                return [m['name'] for m in response['models']]
         except Exception:
             return []
+
+    async def pull_model(self, model_name: str) -> AsyncGenerator[Dict[str, Any], None]:
+        try:
+            async with AsyncClient() as client:
+                async for progress in await client.pull(model_name, stream=True):
+                    yield progress
+        except Exception as e:
+            yield {"status": f"Error: {str(e)}"}
+
+    async def delete_model(self, model_name: str) -> bool:
+        try:
+            async with AsyncClient() as client:
+                await client.delete(model_name)
+                return True
+        except Exception:
+            return False
 
     async def get_response(self, user_input: str) -> AsyncGenerator[str, None]:
         """Sends user input to Ollama and handles tool calls if necessary."""
         self.history.append({'role': 'user', 'content': user_input})
         
         try:
-            # First pass: Check for tool calls
-            # Note: We disable streaming for the tool call check to simplify logic
-            response = await self.client.chat(
-                model=self.config.model_name,
-                messages=self.history,
-                tools=TOOL_SCHEMAS
-            )
-            
-            # Process tool calls if any
-            if response.get('message', {}).get('tool_calls'):
-                self.history.append(response['message'])
+            async with AsyncClient() as client:
+                # First pass: Check for tool calls
+                # Note: We disable streaming for the tool call check to simplify logic
+                response = await client.chat(
+                    model=self.config.model_name,
+                    messages=self.history,
+                    tools=TOOL_SCHEMAS
+                )
                 
-                for tool_call in response['message']['tool_calls']:
-                    function_name = tool_call['function']['name']
-                    arguments = tool_call['function']['arguments']
+                # Process tool calls if any
+                if response.get('message', {}).get('tool_calls'):
+                    self.history.append(response['message'])
                     
-                    if function_name in TOOLS:
-                        yield f"\n[bold cyan][System: Calling tool '{function_name}' with {arguments}...][/bold cyan]\n"
-                        result = await TOOLS[function_name](**arguments)
-                        self.history.append({
-                            'role': 'tool',
-                            'content': str(result),
-                        })
+                    for tool_call in response['message']['tool_calls']:
+                        function_name = tool_call['function']['name']
+                        arguments = tool_call['function']['arguments']
+                        
+                        if function_name in TOOLS:
+                            yield f"\n[System: Calling tool '{function_name}' with {arguments}...]\n"
+                            result = await TOOLS[function_name](**arguments)
+                            self.history.append({
+                                'role': 'tool',
+                                'content': str(result),
+                            })
 
-                # Second pass: Get final response with tool results
-                # We re-enable streaming here if configured
-                if self.config.stream:
-                    final_response = await self.client.chat(
-                        model=self.config.model_name,
-                        messages=self.history,
-                        stream=True
-                    )
-                    full_content = ""
-                    async for chunk in final_response:
-                        content = chunk['message']['content']
-                        full_content += content
+                    # Second pass: Get final response with tool results
+                    # We re-enable streaming here if configured
+                    if self.config.stream:
+                        final_response = await client.chat(
+                            model=self.config.model_name,
+                            messages=self.history,
+                            stream=True
+                        )
+                        full_content = ""
+                        async for chunk in final_response:
+                            content = chunk['message']['content']
+                            full_content += content
+                            yield content
+                        self.history.append({'role': 'assistant', 'content': full_content})
+                    else:
+                        final_response = await client.chat(
+                            model=self.config.model_name,
+                            messages=self.history,
+                            stream=False
+                        )
+                        content = final_response['message']['content']
+                        self.history.append({'role': 'assistant', 'content': content})
                         yield content
-                    self.history.append({'role': 'assistant', 'content': full_content})
                 else:
-                    final_response = await self.client.chat(
-                        model=self.config.model_name,
-                        messages=self.history,
-                        stream=False
-                    )
-                    content = final_response['message']['content']
-                    self.history.append({'role': 'assistant', 'content': content})
-                    yield content
-            else:
-                # No tool calls, just stream normal response
-                if self.config.stream:
-                    stream_response = await self.client.chat(
-                        model=self.config.model_name,
-                        messages=self.history,
-                        stream=True
-                    )
-                    full_content = ""
-                    async for chunk in stream_response:
-                        content = chunk['message']['content']
-                        full_content += content
+                    # No tool calls, just stream normal response
+                    if self.config.stream:
+                        stream_response = await client.chat(
+                            model=self.config.model_name,
+                            messages=self.history,
+                            stream=True
+                        )
+                        full_content = ""
+                        async for chunk in stream_response:
+                            content = chunk['message']['content']
+                            full_content += content
+                            yield content
+                        self.history.append({'role': 'assistant', 'content': full_content})
+                    else:
+                        normal_response = await client.chat(
+                            model=self.config.model_name,
+                            messages=self.history,
+                            stream=False
+                        )
+                        content = normal_response['message']['content']
+                        self.history.append({'role': 'assistant', 'content': content})
                         yield content
-                    self.history.append({'role': 'assistant', 'content': full_content})
-                else:
-                    normal_response = await self.client.chat(
-                        model=self.config.model_name,
-                        messages=self.history,
-                        stream=False
-                    )
-                    content = normal_response['message']['content']
-                    self.history.append({'role': 'assistant', 'content': content})
-                    yield content
 
             await self._manage_history()
             self._save_history()
@@ -217,10 +234,11 @@ class ChatClient:
             summary_prompt += f"{msg['role'].capitalize()}: {msg.get('content', '[Tool Call]')}\n"
         
         try:
-            response = await self.client.chat(
-                model=self.config.model_name,
-                messages=[{'role': 'user', 'content': summary_prompt}]
-            )
+            async with AsyncClient() as client:
+                response = await client.chat(
+                    model=self.config.model_name,
+                    messages=[{'role': 'user', 'content': summary_prompt}]
+                )
             summary_content = response['message']['content']
             new_history = []
             if start_idx == 1: new_history.append(self.history[0])
