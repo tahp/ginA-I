@@ -48,6 +48,19 @@ class ChatClient:
         except Exception as e:
             print(f"Warning: Could not save history to {self.config.history_file}: {e}")
 
+    def set_model(self, model_name: str) -> None:
+        """Updates the active model."""
+        self.config.model_name = model_name
+        print(f"Model switched to: {model_name}")
+
+    async def list_models(self) -> List[str]:
+        """Lists available local models."""
+        try:
+            response = await self.client.list()
+            return [m['name'] for m in response['models']]
+        except Exception:
+            return []
+
     async def get_response(self, user_input: str) -> AsyncGenerator[str, None]:
         """Sends user input to Ollama and yields/returns the AI response asynchronously."""
         self.history.append({'role': 'user', 'content': user_input})
@@ -91,28 +104,40 @@ async def main() -> None:
     client = ChatClient(config)
 
     print(f"Chatbot initialized with model: {config.model_name}")
-    print("Type 'quit' to exit.")
+    print("Commands: /quit, /model <name>, /list")
 
     while True:
         try:
-            # Note: input() is blocking, but for a CLI this is standard. 
-            # In a more complex app, we'd use aioconsole.
             user_input: str = input("\nYou: ").strip()
             
             if not user_input:
                 continue
 
-            if user_input.lower() == 'quit':
+            # Command Routing
+            if user_input.lower() in ['/quit', 'quit']:
                 print("Chatbot: Goodbye!")
                 break
             
+            if user_input.lower() == '/list':
+                models = await client.list_models()
+                print("Available models:")
+                for m in models:
+                    print(f" - {m}")
+                continue
+
+            if user_input.lower().startswith('/model '):
+                new_model = user_input[7:].strip()
+                if new_model:
+                    client.set_model(new_model)
+                continue
+            
+            # Normal chat
             print("Chatbot: ", end="", flush=True)
             if config.stream:
                 async for chunk in client.get_response(user_input):
                     print(chunk, end="", flush=True)
                 print()
             else:
-                # Get the first (and only) item from the async generator
                 async for chunk in client.get_response(user_input):
                     print(chunk)
                     break
