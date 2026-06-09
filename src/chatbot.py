@@ -1,11 +1,11 @@
 import os
 import sys
-from typing import List, Dict, Optional, Generator
-import ollama
+import asyncio
+import json
+from typing import List, Dict, Optional, AsyncGenerator
+from ollama import AsyncClient
 from dotenv import load_dotenv
 from dataclasses import dataclass, field
-
-import json
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,10 +20,11 @@ class ChatConfig:
     history_file: str = "chat_history.json"
 
 class ChatClient:
-    """Client for interacting with the Ollama API."""
+    """Asynchronous client for interacting with the Ollama API."""
     def __init__(self, config: ChatConfig):
         self.config = config
         self.history: List[Dict[str, str]] = []
+        self.client = AsyncClient()
         self._load_history()
         
         # If history is empty and we have a system prompt, add it
@@ -47,32 +48,31 @@ class ChatClient:
         except Exception as e:
             print(f"Warning: Could not save history to {self.config.history_file}: {e}")
 
-    def get_response(self, user_input: str) -> Generator[str, None, str]:
-        """Sends user input to Ollama and yields/returns the AI response."""
+    async def get_response(self, user_input: str) -> AsyncGenerator[str, None]:
+        """Sends user input to Ollama and yields/returns the AI response asynchronously."""
         self.history.append({'role': 'user', 'content': user_input})
         
         try:
             full_response = ""
             if self.config.stream:
-                response = ollama.chat(model=self.config.model_name, messages=self.history, stream=True)
-                for chunk in response:
+                response = await self.client.chat(model=self.config.model_name, messages=self.history, stream=True)
+                async for chunk in response:
                     content = chunk['message']['content']
                     full_response += content
                     yield content
                 self.history.append({'role': 'assistant', 'content': full_response})
                 self._trim_history()
                 self._save_history()
-                return full_response
             else:
-                response = ollama.chat(model=self.config.model_name, messages=self.history, stream=False)
+                response = await self.client.chat(model=self.config.model_name, messages=self.history, stream=False)
                 full_response = response['message']['content']
                 self.history.append({'role': 'assistant', 'content': full_response})
                 self._trim_history()
                 self._save_history()
                 yield full_response
-                return full_response
         except Exception as e:
-            self.history.pop()  # Remove the user input if it failed
+            if self.history and self.history[-1]['role'] == 'user':
+                self.history.pop()  # Remove the user input if it failed
             raise e
 
     def _trim_history(self) -> None:
@@ -82,10 +82,10 @@ class ChatClient:
         while len(self.history) > self.config.history_limit + start_index:
             self.history.pop(start_index)
 
-def main() -> None:
+async def main() -> None:
     """
     Main entry point of the chatbot program.
-    Runs an infinite loop to take user input and provide responses via Ollama API.
+    Runs an asynchronous loop to take user input and provide responses via Ollama API.
     """
     config = ChatConfig()
     client = ChatClient(config)
@@ -95,6 +95,8 @@ def main() -> None:
 
     while True:
         try:
+            # Note: input() is blocking, but for a CLI this is standard. 
+            # In a more complex app, we'd use aioconsole.
             user_input: str = input("\nYou: ").strip()
             
             if not user_input:
@@ -106,12 +108,14 @@ def main() -> None:
             
             print("Chatbot: ", end="", flush=True)
             if config.stream:
-                for chunk in client.get_response(user_input):
+                async for chunk in client.get_response(user_input):
                     print(chunk, end="", flush=True)
                 print()
             else:
-                ai_response = next(client.get_response(user_input))
-                print(ai_response)
+                # Get the first (and only) item from the async generator
+                async for chunk in client.get_response(user_input):
+                    print(chunk)
+                    break
 
         except KeyboardInterrupt:
             print("\nChatbot: Goodbye!")
@@ -120,4 +124,7 @@ def main() -> None:
             print(f"\nAn error occurred: {e}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
