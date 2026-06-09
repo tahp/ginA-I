@@ -47,12 +47,19 @@ A simple, modular Python chatbot that interacts with Ollama models.
 
 ## Usage
 
-Run the chatbot:
+### CLI Chatbot
+Run the chatbot in your terminal:
 ```bash
 python3 src/chatbot.py
 ```
 
-Type `quit` to exit the program.
+### Web Interface
+Run the web-based chat interface:
+```bash
+streamlit run src/web_app.py
+```
+
+Type `quit` (in CLI) or close the browser tab to exit.
 
 ## Running Tests
 
