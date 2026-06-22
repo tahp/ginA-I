@@ -23,11 +23,16 @@ def get_environment_context():
 
 def summarize_old_messages(messages):
     """Takes the oldest messages and turns them into one summary."""
-    # We take everything from index 1 to -10 (the 'old' stuff)
+    # We take everything from index  than the last 10, but excluding the system prompt (index 0)
+    # This ensures we are summarizing actual conversation history.
     to_summarize = messages[1:-10]
+    
+    if not to_summarize:
+        return "The conversation is just beginning."
+
     context_str = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in to_summarize])
 
-    prompt = f"Summarize the key context from these conversation logs into one sentence: {context_str}"
+    prompt = f"Summarize the key context from these conversation logs into one concise sentence: {context_str}"
 
     # Call ollama to get a summary
     summary_response = ollama.chat(model=MODEL, messages=[{'role': 'user', 'content': prompt}])
@@ -89,9 +94,15 @@ def chat():
             print("\n[System]: Condensing memories...")
             summary = summarize_old_messages(messages)
 
-            # The new structure becomes: [System] + [The Summary] + [Last 10 messages]
-            # This keeps the history alive but compressed!
-            messages = [messages[0], {'role': 'user', 'content': f"Summary of past conversation: {summary}"}] + messages[-10:]
+            # The new structure becomes: [System] + [The Summary as a system/user context] + [Last 10 messages]
+            # We keep the system prompt at index 0.
+            # We then add the summary as a 'system' message so it acts as permanent context.
+            new_history = [messages[0], {'role': 'system', 'content': f"Context from previous conversation: {summary}"}]
+            
+            # Add the most recent messages (the last 10) to the new history
+            # We use [-10:] but ensure we don't duplicate if the list is short.
+            new_history.extend(messages[-10:])
+            messages = new_history
 
 if __name__ == "__main__":
     chat()
