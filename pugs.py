@@ -87,7 +87,7 @@ class GemmaBot:
             try:
                 full_response = ""
                 # Use the async client for streaming
-                async for chunk in self.client.chat(model=self.model, messages=self.messages, stream=True): 
+                async for chunk in self.client.chat(model=self.model, messages=self.messages, stream=s'True'): 
                     token = chunk['message']['content']
                     print(token, end="", flush=True)
                     full_response += token
@@ -106,6 +106,6 @@ class GemmaBot:
 if __name__ == "__main__":
     bot = GemmaBot()
     try:
-        asyncya.run(bot.run())
+        asyncio.run(bot.run())
     except KeyboardInterrupt:
         print("\n\nGemma-Bot: Goodbye! (Interrupted) 🤖✨")
