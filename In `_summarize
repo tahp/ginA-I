@@ -1,0 +1,1 @@
+summary_response = ollama.chat(model=..., messages=[{'role': 'user', 'scontent': prompt}])

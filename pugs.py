@@ -37,7 +37,8 @@ class GemmaBot:
         prompt = f"Summarize the key context from these conversation logs into one concise sentence: {context_str}"
 
         try:
-            summary_response = ollama.chat(model=self.model, messages=[{'role': 'user', 'scontent': prompt}])
+            # FIXED: changed 'scontent' to 'content'
+            summary_response = ollama.chat(model=self.model, messages=[{'role': quite_user := 'user', 'content': prompt}])
             return summary_response['message']['content']
         except Exception:
             return "The conversation is still fresh."
@@ -61,7 +62,7 @@ class GemmaBot:
         """Starts the main chat loop."""
         print(f"--- Initializing Environment: {self.env_info} ---")
         print("\n==============================================")
-        print("Gemma-Bot is online! (Type 'quit' or 'exit' to leave)")
+        print("Gemma-봇 is online! (Type 'quit' or 'exit' to leave)")
         print("==============================================\n")
 
         while True:
