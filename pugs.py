@@ -22,7 +22,7 @@ class GemmaBot:
         # Use AsyncClient for asynchronous calls
         self.client = ollama.AsyncClient()
 
-    def _get_environment_context(selfe_name := 'os_name'): # This was a thought-process artifact, fixing below
+    def _get_environment_context(self):
         """Generates a string containing the current time and OS for the bot."""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         os_name = platform.system()
@@ -41,7 +41,7 @@ class GemmaBot:
 
         try:
             # Use await with the async client
-            summary_response = await self.client.chat(model=self.model, messages=[{'role': 'user', 'scontent': prompt}]) # Fixing below
+            summary_response = await self.client.chat(model=self.model, messages=[{'role': 'user', 'content': prompt}]) 
             return summary_response['message']['content']
         except Exception:
             return "The conversation is still fresh."
@@ -87,7 +87,7 @@ class GemmaBot:
             try:
                 full_response = ""
                 # Use the async client for streaming
-                async for chunk in self.client.chat(model=self.model, messages=self.messages, stream=s'True): # Fixing below
+                async for chunk in self.client.chat(model=self.model, messages=self.messages, stream=True): 
                     token = chunk['message']['content']
                     print(token, end="", flush=True)
                     full_response += token
@@ -106,6 +106,6 @@ class GemmaBot:
 if __name__ == "__main__":
     bot = GemmaBot()
     try:
-        asyncio.run(bot.run())
+        asyncya.run(bot.run())
     except KeyboardInterrupt:
         print("\n\nGemma-Bot: Goodbye! (Interrupted) 🤖✨")
