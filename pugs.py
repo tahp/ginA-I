@@ -5,7 +5,8 @@ import sys
 
 # --- CONFIGURATION ---
 # The model you are using
-MODEL = 'hf.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2:Q4_K_M'
+MODEL = 'hf.co/Jiunsced/supergemma4-26b-uncensored-gguf-v2:Q4_K_M'
+MAX_MESSAGES = 30
 
 # The core personality of your bot
 SYSTEM_PROMPT = (
