@@ -19,8 +19,29 @@ class GemmaBot:
         # Initialize messages with the system prompt
         self.messages = [{'role': 'system', 'content': self.system_prompt}]
         self.env_info = self._get_environment_context()
-        # Use AsyncClient for asynchronous calls
-        self.client = ollama.AsyncClient()
+        try:
+            self.client = ollama.AsyncClient()
+            async def _test_connection():
+                try:
+                    await self.client.chat(model='llama3', messages=[{'role': 'user', 'content': 'ping'}])
+                except Exception as e:
+                    print(f"[Setup]: OLLAMA service is running. Model check skipped.")
+                    return True
+            import asyncio as aio
+            aio.run(_test_connection())
+        except Exception as e:
+            err_msg = str(e).replace('\n', ': ') or "Connection failed"
+            print(f"[Error]: {err_msg}")
+
+    def _get_model_info(self):
+        """Check if model exists on local server."""
+        try:
+            response = await self.client.list()
+            return next((m['name'] for m in response.get('models', []) 
+                         if 'llama3' not in str(m) and 'gemma' not in str(m)), None)
+        except Exception as e:
+            print(f"[Info]: Cannot verify models (Error: {e})")
+            return None
 
     def _get_environment_context(self):
         """Generates a string containing the current time and OS for the bot."""
@@ -42,8 +63,12 @@ class GemmaBot:
         try:
             # Use await with the async client
             summary_response = await self.client.chat(model=self.model, messages=[{'role': 'user', 'content': prompt}]) 
-            return summary_response['message']['content']
-        except Exception:
+            if not summary_response or 'message' not in summary_response:
+                return "The conversation is still fresh."
+            content = summary_response['message']['content']
+        except Exception as e:
+            err_msg = str(e).replace('\n', ': ') or "Failed to summarize"
+            print(f"[Info]: Summarization error (Error: {err_msg})")
             return "The conversation is still fresh."
 
     async def _condense_history(self):
@@ -87,7 +112,8 @@ class GemmaBot:
             try:
                 full_response = ""
                 # Use the async client for streaming
-                async for chunk in self.client.chat(model=self.model, messages=self.messages, stream=s'True'): 
+                response = await self.client.chat(model=self.model, messages=self.messages, stream=True)
+                async for chunk in response:
                     token = chunk['message']['content']
                     print(token, end="", flush=True)
                     full_response += token
