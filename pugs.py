@@ -13,6 +13,8 @@ SYSTEM_PROMPT = (
 HISTORY_THRESHOLD = 20
 RETAIN_MESSAGES = 10
 CONTEXT_LIMIT = 8192
+MAX_RESPONSE_TOKENS = 1024
+SUMMARY_MAX_TOKENS = 150
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 1.0
 
@@ -37,13 +39,12 @@ class GemmaBot:
             {"role": "system", "content": system_prompt}
         ]
         self.client = ollama.AsyncClient()
-        self.env_info = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     async def _check_connection(self) -> str | None:
         try:
             models = await self.client.list()
             available = [m["name"] for m in models.get("models", [])]
-            if not any(self.model in name or name in self.model for name in available):
+            if self.model not in available:
                 closest = ", ".join(available[:5]) if available else "none"
                 return (
                     f"Model '{self.model}' not found locally.\n"
@@ -71,9 +72,11 @@ class GemmaBot:
             response = await self.client.chat(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
+                options={"num_predict": SUMMARY_MAX_TOKENS},
             )
             return response["message"]["content"]
-        except Exception:
+        except Exception as e:
+            print(f"\n[Warning] Summary failed: {e}", flush=True)
             return "The conversation is still fresh."
 
     async def _condense_history(self) -> None:
@@ -95,9 +98,9 @@ class GemmaBot:
 
         for attempt in range(RETRY_ATTEMPTS):
             if attempt > 0:
-                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
                 print(
-                    f"\n[Retry] Attempt {attempt + 1}/{RETRY_ATTEMPTS} in {delay}s...",
+                    f"\n[Retry] Attempt {attempt + 1}/{RETRY_ATTEMPTS} in {delay:.0f}s...",
                     flush=True,
                 )
                 await asyncio.sleep(delay)
@@ -105,7 +108,10 @@ class GemmaBot:
             try:
                 full: list[str] = []
                 response = await self.client.chat(
-                    model=self.model, messages=self.messages, stream=True
+                    model=self.model,
+                    messages=self.messages,
+                    stream=True,
+                    options={"num_predict": MAX_RESPONSE_TOKENS},
                 )
                 async for chunk in response:
                     token: str = chunk["message"]["content"]
@@ -121,8 +127,9 @@ class GemmaBot:
         return ""
 
     async def run(self) -> None:
+        env_info = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(
-            f"--- Gemma-Bot initialized at {self.env_info} on {platform.system()} ---"
+            f"--- Gemma-Bot initialized at {env_info} on {platform.system()} ---"
         )
         print("=" * 46)
         print("Gemma-Bot is online!  (type 'quit' or 'exit' to leave)")
@@ -145,8 +152,10 @@ class GemmaBot:
             if not user_input:
                 continue
 
-            if _total_tokens(self.messages) >= int(CONTEXT_LIMIT * 0.75):
+            condensed = False
+            if _total_tokens(self.messages) >= CONTEXT_LIMIT * 0.75:
                 await self._condense_history()
+                condensed = True
 
             self.messages.append({"role": "user", "content": user_input})
             reply = await self._stream_response()
@@ -156,7 +165,7 @@ class GemmaBot:
             else:
                 self.messages.pop()
 
-            if len(self.messages) > HISTORY_THRESHOLD:
+            if not condensed and len(self.messages) > HISTORY_THRESHOLD:
                 await self._condense_history()
 
 
